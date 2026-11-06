@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Quiz Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans">
+    <header class="border-b border-slate-800 bg-slate-950/80 backdrop-blur py-4 px-6 sticky top-0 z-50">
+        <div class="max-w-4xl mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
+                🧠 AI Quiz Generator
+            </h1>
+            <button onclick="loadLeaderboard()" class="text-sm px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 transition">
+                📊 Історія результатів
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-grow max-w-3xl w-full mx-auto p-4 md:p-6">
+        <section id="config-card" class="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-6 shadow-xl">
+            <h2 class="text-xl font-semibold mb-4 text-slate-200">Створити новий AI-тест</h2>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Ім'я користувача</label>
+                    <input type="text" id="username-input" value="Денис" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 focus:outline-none focus:border-indigo-500">
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Тема квізу</label>
+                    <input type="text" id="topic-input" placeholder="наприклад: Історія України, Python, Астрономія" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 focus:outline-none focus:border-indigo-500">
+                </div>
+                <div>
+                    <label class="block text-sm text-slate-400 mb-1">Рівень складності</label>
+                    <select id="difficulty-select" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2.5 focus:outline-none focus:border-indigo-500">
+                        <option value="Початковий">Початковий (Easy)</option>
+                        <option value="Середній" selected>Середній (Medium)</option>
+                        <option value="Складний">Складний (Hard)</option>
+                    </select>
+                </div>
+                <button onclick="startQuiz()" id="start-btn" class="w-full bg-indigo-600 hover:bg-indigo-500 font-semibold py-3 rounded-xl transition shadow-lg shadow-indigo-600/30">
+                    🚀 Згенерувати квіз через ШІ
+                </button>
+            </div>
+        </section>
+
+        <div id="loader" class="hidden text-center py-12">
+            <div class="inline-block animate-spin rounded-full h-10 w-10 border-4 border-indigo-500 border-t-transparent"></div>
+            <p class="mt-4 text-slate-400">ШІ генерує унікальні питання...</p>
+        </div>
+
+        <section id="quiz-card" class="hidden bg-slate-800/60 border border-slate-700/60 rounded-2xl p-6 shadow-xl">
+            <div class="flex justify-between items-center mb-6">
+                <span id="quiz-badge" class="px-3 py-1 text-xs rounded-full bg-indigo-500/20 text-indigo-300 font-medium"></span>
+                <span id="quiz-progress" class="text-sm text-slate-400"></span>
+            </div>
+            <h3 id="question-text" class="text-lg font-medium mb-6"></h3>
+            <div id="options-container" class="space-y-3 mb-6"></div>
+            <div class="flex justify-between">
+                <button onclick="nextQuestion()" id="next-btn" class="ml-auto bg-indigo-600 hover:bg-indigo-500 font-medium px-6 py-2.5 rounded-xl transition">
+                    Далі ➔
+                </button>
+            </div>
+        </section>
+
+        <section id="result-card" class="hidden bg-slate-800/60 border border-slate-700/60 rounded-2xl p-6 shadow-xl">
+            <div class="text-center mb-8">
+                <h2 class="text-2xl font-bold text-slate-100 mb-2">Результати тестування</h2>
+                <div id="score-circle" class="text-4xl font-extrabold text-indigo-400 my-4"></div>
+                <p id="score-text" class="text-slate-400"></p>
+            </div>
+            <h3 class="font-semibold mb-4 text-slate-200">Детальний фідбек від ШІ:</h3>
+            <div id="feedback-list" class="space-y-4 mb-6"></div>
+            <button onclick="resetQuiz()" class="w-full bg-slate-700 hover:bg-slate-600 font-medium py-3 rounded-xl transition">
+                🔄 Пройти новий тест
+            </button>
+        </section>
+
+        <dialog id="history-modal" class="bg-slate-900 border border-slate-700 text-slate-100 rounded-2xl p-6 max-w-lg w-full backdrop:bg-black/60">
+            <h3 class="text-lg font-bold mb-4">Останні результати (SQLite DB)</h3>
+            <div id="history-content" class="space-y-3 max-h-80 overflow-y-auto mb-4"></div>
+            <button onclick="document.getElementById('history-modal').close()" class="w-full bg-slate-800 hover:bg-slate-700 py-2 rounded-xl">Закрити</button>
+        </dialog>
+    </main>
+
+    <script>
+        let currentQuiz = null;
+        let currentIndex = 0;
+        let userAnswers = {};
+
+        async function startQuiz() {
+            const topic = document.getElementById("topic-input").value.trim();
+            const difficulty = document.getElementById("difficulty-select").value;
+            if (!topic) return alert("Введіть тему!");
+
+            document.getElementById("config-card").classList.add("hidden");
+            document.getElementById("loader").classList.remove("hidden");
+
+            try {
+                const res = await fetch("/api/generate-quiz", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({ topic, difficulty })
+                });
+                currentQuiz = await res.json();
+                currentIndex = 0;
+                userAnswers = {};
+
+                document.getElementById("loader").classList.add("hidden");
+                document.getElementById("quiz-card").classList.remove("hidden");
+                renderQuestion();
+            } catch (err) {
+                alert("Помилка генерації!");
+                resetQuiz();
+            }
+        }
+
+        function renderQuestion() {
+            const q = currentQuiz.questions[currentIndex];
+            document.getElementById("quiz-badge").innerText = `${currentQuiz.topic} (${currentQuiz.difficulty})`;
+            document.getElementById("quiz-progress").innerText = `Питання ${currentIndex + 1} з ${currentQuiz.questions.length}`;
+            document.getElementById("question-text").innerText = q.question;
+
+            const container = document.getElementById("options-container");
+            container.innerHTML = "";
+
+            q.options.forEach((opt, idx) => {
+                const isSelected = userAnswers[currentIndex] === idx;
+                const btn = document.createElement("button");
+                btn.className = `w-full text-left p-4 rounded-xl border transition ${
+                    isSelected ? "bg-indigo-600/30 border-indigo-500 text-indigo-200" : "bg-slate-900/60 border-slate-700 hover:border-slate-500 text-slate-300"
+                }`;
+                btn.innerText = opt;
+                btn.onclick = () => {
+                    userAnswers[currentIndex] = idx;
+                    renderQuestion();
+                };
+                container.appendChild(btn);
+            });
+
+            document.getElementById("next-btn").innerText = (currentIndex === currentQuiz.questions.length - 1) ? "Завершити ✅" : "Далі ➔";
+        }
+
+        async function nextQuestion() {
+            if (userAnswers[currentIndex] === undefined) {
+                return alert("Будь ласка, оберіть варіант відповіді!");
+            }
+            if (currentIndex < currentQuiz.questions.length - 1) {
+                currentIndex++;
+                renderQuestion();
+            } else {
+                finishQuiz();
+            }
+        }
+
+        async function finishQuiz() {
+            document.getElementById("quiz-card").classList.add("hidden");
+            document.getElementById("loader").classList.remove("hidden");
+
+            const username = document.getElementById("username-input").value;
+            const res = await fetch("/api/submit-quiz", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({
+                    username,
+                    topic: currentQuiz.topic,
+                    difficulty: currentQuiz.difficulty,
+                    questions: currentQuiz.questions,
+                    user_answers: userAnswers
+                })
+            });
+
+            const result = await res.json();
+            document.getElementById("loader").classList.add("hidden");
+            document.getElementById("result-card").classList.remove("hidden");
+
+            document.getElementById("score-circle").innerText = `${result.score} / ${result.total}`;
+            document.getElementById("score-text").innerText = `Успішність: ${result.percentage}%`;
+
+            const feedbackContainer = document.getElementById("feedback-list");
+            feedbackContainer.innerHTML = "";
+
+            result.feedback.forEach((item, idx) => {
+                const div = document.createElement("div");
+                div.className = `p-4 rounded-xl border ${item.is_correct ? "bg-emerald-950/30 border-emerald-800" : "bg-rose-950/30 border-rose-800"}`;
+                div.innerHTML = `
+                    <p class="font-medium text-sm text-slate-200">${idx + 1}. ${item.question}</p>
+                    <p class="text-xs mt-1 ${item.is_correct ? "text-emerald-400" : "text-rose-400"}">
+                        ${item.is_correct ? "✅ Вірно" : "❌ Невірно (Правильна відповідь №" + (item.correct_answer + 1) + ")"}
+                    </p>
+                    <p class="text-xs text-slate-400 mt-1">💡 ${item.explanation}</p>
+                `;
+                feedbackContainer.appendChild(div);
+            });
+        }
+
+        function resetQuiz() {
+            document.getElementById("result-card").classList.add("hidden");
+            document.getElementById("quiz-card").classList.add("hidden");
+            document.getElementById("config-card").classList.remove("hidden");
+        }
+
+        async function loadLeaderboard() {
+            const res = await fetch("/api/leaderboard");
+            const data = await res.json();
+            const container = document.getElementById("history-content");
+            container.innerHTML = data.map(r => `
+                <div class="p-3 bg-slate-800 rounded-lg text-sm flex justify-between items-center border border-slate-700">
+                    <div>
+                        <span class="font-semibold text-indigo-300">${r.username}</span> — ${r.topic} (${r.difficulty})
+                        <div class="text-xs text-slate-400">${r.date}</div>
+                    </div>
+                    <span class="font-bold text-emerald-400">${r.score}/${r.total} (${r.percentage}%)</span>
+                </div>
+            `).join('');
+            document.getElementById("history-modal").showModal();
+        }
+    </script>
+</body>
+</html>

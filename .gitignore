@@ -1,0 +1,6 @@
+.env
+quiz.db
+instance/
+__pycache__/
+*.pyc
+test_gemini.py
